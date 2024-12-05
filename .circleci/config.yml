@@ -1,31 +1,68 @@
-# Use the latest 2.1 version of CircleCI pipeline process engine.
-# See: https://circleci.com/docs/configuration-reference
 version: 2.1
 
-# Define a job to be invoked later in a workflow.
-# See: https://circleci.com/docs/jobs-steps/#jobs-overview & https://circleci.com/docs/configuration-reference/#jobs
+# Define jobs to be invoked later in a workflow.
 jobs:
-  say-hello:
-    # Specify the execution environment. You can specify an image from Docker Hub or use one of our convenience images from CircleCI's Developer Hub.
-    # See: https://circleci.com/docs/executor-intro/ & https://circleci.com/docs/configuration-reference/#executor-job
+  run-unit-tests:
     docker:
-      # Specify the version you desire here
-      # See: https://circleci.com/developer/images/image/cimg/base
-      - image: cimg/base:current
-
-    # Add steps to the job
-    # See: https://circleci.com/docs/jobs-steps/#steps-overview & https://circleci.com/docs/configuration-reference/#steps
+      - image: cimg/openjdk:17.0  # Imagen base con Java 17
     steps:
-      # Checkout the code as the first step.
+      - checkout  # Descarga el código fuente
+      - run:
+          name: Install Dependencies
+          command: mvn dependency:resolve  # Asegura que las dependencias estén disponibles
+      - run:
+          name: Run Unit Tests (UserServiceTest)
+          command: mvn test -Dtest=com.mayab.quality.unittest.service.UserServiceTest -e -X
+      - run:
+          name: Notify
+          command: echo "Unit Tests completed successfully."
+
+  run-integration-test:
+    docker:
+      - image: cimg/openjdk:17.0
+      - image: mysql:8.0
+        environment:
+          MYSQL_ROOT_PASSWORD: 123456
+          MYSQL_DATABASE: dbunit
+    steps:
       - checkout
       - run:
-          name: "Say hello"
-          command: "echo Hello, World!"
+          name: Waiting for MySQL to be ready
+          command: |
+            for i in $(seq 1 10);
+            do
+              nc -z 127.0.0.1 3306 && echo Success && exit 0
+              echo -n .
+              sleep 1
+            done
+            echo Failed waiting for MySQL && exit 1
+      - run:
+          name: Install MySQL and import schema
+          command: |
+            sudo apt update && sudo apt install default-mysql-client
+            echo "SOURCE src/test/resources/schema.sql;" | mysql -h 127.0.0.1 -uroot -p123456 dbunit
+            echo "Checking tables in dbunit..."
+            mysql -h 127.0.0.1 -uroot -p123456 dbunit -e "SHOW TABLES;"
+            echo "SELECT * FROM usuarios;" | mysql -h 127.0.0.1 -uroot -p123456 dbunit
+            echo "done"
+      - run:
+          name: Verify MySQL is Ready for Tests
+          command: |
+            mysql -h 127.0.0.1 -P 3306 -u root -p123456 -e "SELECT 1;"
+      - run:
+          name: Verify Tables in Database
+          command: |
+            mysql -h 127.0.0.1 -P 3306 -u root -p123456 -e "SHOW TABLES;" dbunit
+      - run:
+          name: Run Integration Test
+          command: mvn test -Dtest=com.mayab.quality.integration.UserServiceTest -e -X
+      - run:
+          name: Notify
+          command: echo "Integration Tests completed successfully."
 
 # Orchestrate jobs using workflows
-# See: https://circleci.com/docs/workflows/ & https://circleci.com/docs/configuration-reference/#workflows
 workflows:
-  say-hello-workflow: # This is the name of the workflow, feel free to change it to better match your workflow.
-    # Inside the workflow, you define the jobs you want to run.
+  version: 2
+  test-workflow:
     jobs:
-      - say-hello
+      - run-unit-tests
