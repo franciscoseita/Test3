@@ -66,3 +66,4 @@ workflows:
   test-workflow:
     jobs:
       - run-unit-tests
+      - run-integration-test
